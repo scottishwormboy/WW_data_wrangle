@@ -150,9 +150,9 @@ write.out.JBCseq <- function(EA.file,samp.sheet.file,out.file=NULL,seq.lab= "LIV
   
   samp.sheet <- read.csv(samp.sheet.file)
   samp.sheet$rna_plate_number <-  
-    sapply(in.4col$SampleID,function(X){strsplit(X,split="_")[[1]][4]})
+    sapply(samp.sheet$SampleID,function(X){strsplit(X,split="_")[[1]][4]})
   samp.sheet$rna_sample_plate_position <-
-    sapply(in.4col$SampleID,function(X){strsplit(X,split="_")[[1]][5]})
+    sapply(samp.sheet$SampleID,function(X){strsplit(X,split="_")[[1]][5]})
   
   
   #create a field to merge
