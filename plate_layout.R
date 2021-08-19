@@ -5,16 +5,30 @@
 
 ### READ IN FUNCTIONS
 
-write.plate.layout <- function(file.csv,rownames=TRUE,colnames=TRUE){
+write.plate.layout <- function(file.csv,rownames=TRUE,colnames=TRUE,outdir="tmp"){
   #file must be in csv format and have the columns in the if statement below
   #will stop with an error if multiple wells for the same plate found
   #may be other formatting errors I've not thought of
+  #set outdir="" to write to current directory, or other value (directory must exist already), 
+  #default creates a temporary directory
   
   #output will be a set of csv files with 8 rows and 12 columns and sample IDs
   
   #example: write.plate.layout("test_layout_1.csv",rownames=FALSE,colnames=FALSE)
   
+  #bunch of stuff to deal with setting up an output directory
+  if(outdir=="tmp") {
+    outdir=paste("tmp_",paste(letters[sample(1:26,12,replace=TRUE)],collapse=""),sep="")
+
+  }
+  if(nchar(outdir)>0) {
+    if(substr(outdir,nchar(outdir),nchar(outdir)) != "/") outdir <- paste(outdir,"/",sep="")
+    if(!dir.exists(outdir)) dir.create(outdir)
+  }
+  
   pl.in <- read.csv(file=file.csv)
+  
+  #checked 18/8/21 with RNA template v3
   if(sum(names(pl.in) %in% c("rna_plate_number","rna_sample_plate_position","rna_sample_plate_position_row","rna_sample_plate_position_column","sample_id"))!=5) stop("missing fields: one of rna_plate_number,rna_sample_plate_position,rna_sample_plate_position_row,rna_sample_plate_position_column,sample_id")
   
   #step through each plate found
@@ -22,7 +36,7 @@ write.plate.layout <- function(file.csv,rownames=TRUE,colnames=TRUE){
   for(plate in pl.nos){
     pl.subset <- pl.in[pl.in$rna_plate_number==plate,]
     test.table <- table(pl.subset$rna_sample_plate_position)
-    if(any(test.table>1)) stop(paste("plate ",plate,"has multiple samples for the same well"))
+    if(any(test.table>1)) stop(paste("plate ",plate,"has multiple samples for the same well",names(test.table)[test.table>1]))
     out.mat <- matrix(data="not_filled",nrow=8,ncol=12,dimnames=list(rows=LETTERS[1:8],cols=paste("c",1:12,sep="_")))
     for(m in 1:8){
       for(n in 1:12){ #go through each well, test whether there's a record, if so print sample id
@@ -34,7 +48,7 @@ write.plate.layout <- function(file.csv,rownames=TRUE,colnames=TRUE){
       }
     }
     #called the values for rownames/colnames in a confusing way
-    write.table(out.mat,file=paste(plate,".csv",sep=""),sep=",",row.names=rownames,col.names=colnames)
+    write.table(out.mat,file=paste(outdir,plate,".csv",sep=""),sep=",",row.names=rownames,col.names=colnames)
     #quote=TRUE is default, stops crap with commas etc in field names
   }
 }
@@ -137,7 +151,7 @@ write.4col <- function(file.in, idx.list, idx.id, SampleProject, i7_index="sampl
 
 #function to write sequence ids to EA files
 
-write.out.JBCseq <- function(EA.file,samp.sheet.file,out.file=NULL,seq.lab= "LIVE"){
+write.out.JBCseq <- function(EA.file,samp.sheet.file,out.file=NULL,seq.lab= "LIVERPOOL_UNI"){
   # Takes a csv file from EA and merges with a 4 column (Illumina) sample sheet,
   # created with write.4col
   
@@ -172,9 +186,10 @@ write.out.JBCseq <- function(EA.file,samp.sheet.file,out.file=NULL,seq.lab= "LIV
   tmp.merge.df <- merge(pl.in, samp.sheet[,c("RNA_plate_pos_id","SampleProject","SampleID")], 
                         by = "RNA_plate_pos_id", all.x = TRUE)
   
-  tmp.merge.df$run_id <- tmp.merge.df$SampleProject
-  tmp.merge.df$sample_sequencing_id <- tmp.merge.df$SampleID
-  tmp.merge.df$sequencing_lab_code[!is.na(tmp.merge.df$sample_sequencing_id)] <- seq.lab
+  #changed values for RNAtemplate v3
+  tmp.merge.df$sequencing_run_id <- tmp.merge.df$SampleProject
+  tmp.merge.df$sequencing_sample_id <- tmp.merge.df$SampleID
+  tmp.merge.df$sequencing_lab_code[!is.na(tmp.merge.df$sequencing_sample_id)] <- seq.lab
   
   #order and remove duplicate/unused columns
   pl.out <- tmp.merge.df[order(tmp.merge.df$rna_plate_number,tmp.merge.df$rna_sample_plate_position_row,tmp.merge.df$rna_sample_plate_position_column),!names(tmp.merge.df) %in% c("RNA_plate_pos_id","SampleProject","SampleID")]
