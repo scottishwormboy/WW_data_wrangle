@@ -1,0 +1,118 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW")
+```
+
+```{r}
+setwd("~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW")
+library(betareg)
+library(bootstrap)
+```
+
+load in delta and omicron variant positions
+see https://www.sciencedirect.com/science/article/pii/S0896841121001876?via%3Dihub
+and phe definitions
+This still needs some work, getting the mutations wrong gets delta and omicron not adding to close to one
+```{r}
+delta.sites <- read.table("../../omicron_variant/delta_variants.tsv",col.names = c("site","refbase","altbase"))
+omicron.sites <- read.table("../../omicron_variant/omicron_variants.tsv",col.names = c("site","refbase","altbase"))
+omicron.s.sites <- omicron.sites[omicron.sites$site %in% c(22578,22882,22898,23013,23040,23048,23055, 23202,23525,23599),]
+#no intersection
+```
+
+load in one run 
+get names first
+
+```{r}
+tmp <- dir("211217STW/ncovIllumina_sequenceAnalysis_callPolyVariants")
+tmp <- tmp[grep("acgt.tsv.gz",tmp)]
+tmp <- tmp[-grep("ositive",tmp)]
+tmp <- tmp[-grep("egative",tmp)]
+
+#set up structure
+acgt.vec <- vector(mode="list",length=length(tmp))
+names(acgt.vec) <- sapply(tmp,function(X){paste(strsplit(X,split="_")[[1]][1:7],collapse="_")})
+
+alt_calc <- function(ref.base, base.vec){
+  #base.vec has to be A, C, G, T
+  nRef <- base.vec[names(base.vec) %in% ref.base]
+  nAlt <- sum(base.vec[!names(base.vec) %in% ref.base])
+  out.vec <- c(nRef,nAlt)
+  names(out.vec) <- c("nRef","nAlt")
+  return(out.vec)
+}
+
+for(i in 1:length(acgt.vec)){ #length(acgt.vec)
+  tst <- read.table(paste("211217STW/ncovIllumina_sequenceAnalysis_callPolyVariants/",tmp[i],sep=""),header=TRUE)
+  acgt.vec[[i]]$union.df <- tst[tst$n_base %in% union(delta.sites$site,omicron.s.sites$site),]
+  if(nrow(acgt.vec[[i]]$union.df)==0) next #jump to next i
+  
+  acgt.vec[[i]]$union.df[,c("nRef","nAlt")] <- 0
+  for(j in 1:nrow(acgt.vec[[i]]$union.df)){
+    acgt.vec[[i]]$union.df[j,c("nRef","nAlt")] <- alt_calc(ref.base=acgt.vec[[i]]$union.df[j,"ref_base"],
+          unlist(acgt.vec[[i]]$union.df[j,c("A","C","G","T")]))
+  }
+  acgt.vec[[i]]$delta.df <- acgt.vec[[i]]$union.df[acgt.vec[[i]]$union.df$n_base %in% delta.sites$site,]
+  acgt.vec[[i]]$omicron.df <- acgt.vec[[i]]$union.df[acgt.vec[[i]]$union.df$n_base %in% omicron.sites$site,]
+  
+  #delta estimate
+  acgt.vec[[i]]$delta.df$freq <- acgt.vec[[i]]$delta.df$nAlt/(acgt.vec[[i]]$delta.df$nAlt + acgt.vec[[i]]$delta.df$nRef)
+  
+  acgt.vec[[i]]$delta.mu <- weighted.mean(acgt.vec[[i]]$delta.df$freq,w=(acgt.vec[[i]]$delta.df$nAlt + acgt.vec[[i]]$delta.df$nRef))
+  acgt.vec[[i]]$delta.se <- NA
+  tst <- try(jackknife(acgt.vec[[i]]$delta.df$freq,mean))
+  if(class(tst)!="try-error") {acgt.vec[[i]]$delta.se <- tst$jack.se}
+  acgt.vec[[i]]$delta.n <- nrow(acgt.vec[[i]]$delta.df)
+  
+  #omicron estimate
+  acgt.vec[[i]]$omicron.df$freq <- acgt.vec[[i]]$omicron.df$nAlt/(acgt.vec[[i]]$omicron.df$nAlt + acgt.vec[[i]]$omicron.df$nRef)
+  
+  acgt.vec[[i]]$omicron.mu <- weighted.mean(acgt.vec[[i]]$omicron.df$freq,w=acgt.vec[[i]]$omicron.df$read.depth)
+  acgt.vec[[i]]$omicron.se <- NA
+  tst <- try(jackknife(acgt.vec[[i]]$omicron.df$freq,mean))
+  if(class(tst)!="try-error") {acgt.vec[[i]]$omicron.se <- tst$jack.se}
+  acgt.vec[[i]]$omicron.n <- nrow(acgt.vec[[i]]$omicron.df)
+
+}
+```
+
+Pull out estimates of delata and omicron
+
+Still gets many not adding up to one
+
+```{r}
+acgt.muse.df <- data.frame(sample=names(acgt.vec),
+                           delta.mu = -1, delta.se = -1, delta.n = -1,
+                           omicron.mu = -1, omicron.se = -1, omicron.n = -1)
+#acgt.muse.df$delta.mu <- sapply(acgt.vec,function(X){X$delta.mu})
+#acgt.muse.df$delta.se <- sapply(acgt.vec,function(X){X$delta.se})
+#acgt.muse.df$delta.n <- sapply(acgt.vec,function(X){X$delta.n})
+
+#acgt.muse.df$omicron.mu <- sapply(acgt.vec,function(X){X$omicron.mu})
+#acgt.muse.df$omicron.se <- sapply(acgt.vec,function(X){X$omicron.se})
+#acgt.muse.df$omicron.n <- sapply(acgt.vec,function(X){X$omicron.n})
+
+for(i in 1:nrow(acgt.muse.df)){
+  if(class(acgt.vec[[i]]$delta.mu)=="numeric") acgt.muse.df[i,'delta.mu'] <- acgt.vec[[i]]$delta.mu
+  if(class(acgt.vec[[i]]$delta.se)=="numeric") acgt.muse.df[i,'delta.se'] <- acgt.vec[[i]]$delta.se
+  if(class(acgt.vec[[i]]$delta.n)=="integer") acgt.muse.df[i,'delta.n'] <- acgt.vec[[i]]$delta.n
+  if(class(acgt.vec[[i]]$omicron.mu)=="numeric") acgt.muse.df[i,'omicron.mu'] <- acgt.vec[[i]]$omicron.mu
+  if(class(acgt.vec[[i]]$omicron.se)=="numeric") acgt.muse.df[i,'omicron.se'] <- acgt.vec[[i]]$omicron.se
+  if(class(acgt.vec[[i]]$omicron.n)=="integer") acgt.muse.df[i,'omicron.n'] <- acgt.vec[[i]]$omicron.n
+}
+plot(delta.mu ~ omicron.mu,data=acgt.muse.df[acgt.muse.df$delta.mu>=0 & acgt.muse.df$omicron.mu>=0,])
+
+hist(acgt.muse.df$omicron.mu[acgt.muse.df$omicron.mu>=0],breaks=20,xlab="Estimate omicron proportion",main ="")
+```
+
+output a df for Dec17 as something to play with in plot
+```{r}
+setwd("~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW")
+save(acgt.muse.df,file="acgt.muse.17df.Rdata")
+```
+

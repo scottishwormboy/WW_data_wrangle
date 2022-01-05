@@ -1,0 +1,154 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW")
+setwd("~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW")
+```
+
+Read in EA grid ref etc
+This file comes from something I got earlier in the year, misses geo info on a lot of sites, esp network
+
+```{r}
+EA.samples <- read.csv("~/Dropbox/Datafiles/covid/WW_runs/EA_samples/20210824_EA_WW_COVID_ASSURED.csv")
+EA.lookup <- EA.samples[match(unique(EA.samples$sample_site_code),EA.samples$sample_site_code),c("sample_city_name", "sample_site_name", "sample_site_code", "ons_site_name",  "grid_reference_east", "grid_reference_north","grab_compo_ind")]
+```
+
+Will probably need to export EA.lookup and add in missing grid refs and missing sites added since
+
+See how well this merges with STW list from a Dec run
+
+```{r}
+Dec17.run <- read.csv("~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW/211217STW/211217_LIVERPOOL_UNI_RNA_PLATE_SURVEILLANCE.csv")
+Dec17.run <- Dec17.run[nchar(Dec17.run$sample_site_code)>1,]
+table(Dec17.run$sample_site_code %in% EA.lookup$sample_site_code)
+#Dec17.run[!Dec17.run$sample_site_code %in% EA.lookup$sample_site_code,]
+
+Dec17.run.wsite <- merge(Dec17.run,EA.lookup[,c("sample_site_code","grid_reference_east","grid_reference_north","grab_compo_ind")],by="sample_site_code",all.x=TRUE)
+```
+
+half a dozen or so sites not on the EA lookup, 26 missing grid refs (15 unique)
+
+```{r}
+#install.packages(c("rgdal","spdplyr","geojsonio","rmapshaper"),dependencies=TRUE)
+#library(rgdal)
+#library(spdplyr)
+#library(geojsonio)
+#library(rmapshaper)# Load UK Local Authorities' shapefile into R
+
+#uk_la <- readOGR(dsn = "infuse_dist_lyr_2011_clipped", layer = "infuse_dist_lyr_2011_clipped")# Convert to Longitude / Latitude with WGS84 Coordinate System
+#wgs84 = '+proj=longlat +datum=WGS84'
+#uk_la_trans <- spTransform(uk_la, CRS(wgs84))# Convert from Spatial Dataframe to GeoJSON
+#uk_la_trans_json <- geojson_json(uk_la_trans)# Simplify the polygons
+#uk_la_trans_sim <- ms_simplify(uk_la_trans_json)# Save as GeoJSON file on the file system.
+#geojson_write(uk_la_trans_sim, file = "uk_la.geojson")
+```
+
+try using simpler code
+from https://bookdown.org/yann_ryan/r-for-newspaper-data/mapping-with-r-geocode-and-map-the-british-librarys-newspaper-collection.html
+```{r}
+library(ggplot2)
+library(maps)
+library(mapdata)
+
+worldmap <- map_data('world')
+UKmap <- map_data('worldHires',region="UK")
+GBmap <- map_data('worldHires',region=c('UK', 'Ireland', 'Isle of Man','Isle of Wight', 'Wales:Anglesey'))
+
+england.plot <- ggplot() + 
+  geom_polygon(data = GBmap, 
+               aes(x = long, y = lat, group = group), 
+               fill = 'gray90', color = 'black') + 
+  coord_fixed(ratio = 1.3, xlim = c(-6.5,3), ylim = c(50, 55.5)) + 
+  theme_void()
+england.plot
+#add points to this
+```
+
+Need to convert eastings/northings to lat/long
+
+```{r}
+#install.packages("remotes")
+#remotes::install_github("tayoso2/sfXtra")
+library(sfXtra)
+
+tst <- east_north_to_long_lat(431842, 430539, crs = 27700)
+
+tst <- east_north_to_long_lat(Dec17.run.wsite$grid_reference_east,Dec17.run.wsite$grid_reference_north,crs=27700)
+
+Dec17.run.wsite$longitude <- tst[,1]
+Dec17.run.wsite$latitude <- tst[,2]
+```
+
+plot some points
+
+```{r}
+england.plot + geom_point(data = Dec17.run.wsite[!is.na(Dec17.run.wsite$longitude),], 
+             aes(x = as.numeric(longitude), 
+                 y = as.numeric(latitude)),fill="white",colour="black",shape=21,size=3)
+```
+
+Next step is link with Omicron frequency and fill with colour gradient
+
+```{r}
+setwd("~/Dropbox/Datafiles/covid/WW_runs/Dec21OmicronSTW")
+load(file="acgt.muse.17df.Rdata")
+#acgt.muse.17df <- acgt.muse.df
+```
+
+Add in omicron frequency
+```{r}
+Dec17.run.wfreq <- merge(Dec17.run.wsite,acgt.muse.df,by.x="sequencing_sample_id",by.y="sample",all.x=TRUE)
+Dec17.run.wfreq$omicron.mu[Dec17.run.wfreq$omicron.mu == -1] <- NA
+```
+
+```{r}
+tst <- england.plot + geom_point(data = Dec17.run.wfreq[!is.na(Dec17.run.wfreq$longitude) ,], 
+             aes(x = as.numeric(longitude), 
+                 y = as.numeric(latitude),fill=omicron.mu),colour="black",shape=21,size=3) 
+tst +  scale_color_gradient(low = "white", high = "red",na.value = NA,aesthetics = "fill")
+```
+
+#only run once
+```{r, eval=FALSE} 
+write.csv(Dec17.run.wfreq,file="Dec17.run.wfreq.csv")
+write.csv(EA.lookup,file="EA.lookup.csv") 
+```
+
+Export data and give an easy way to plot
+Just need to 
+```{r}
+
+#essentially this is created by merging 
+#(i) the spreadsheet going to DHSC with the sequencing ids, 
+#(ii) the lookup table with longitude and latitude for each site (better for STWs than network) 
+#(iii) some measure of omicron frequency per sample
+
+
+Dec17.run.wfreq <- read.csv(file="Dec17.run.wfreq.csv")
+
+#do the plots
+library(ggplot2)
+library(maps)
+library(mapdata)
+
+worldmap <- map_data('world')
+UKmap <- map_data('worldHires',region="UK")
+GBmap <- map_data('worldHires',region=c('UK', 'Ireland', 'Isle of Man','Isle of Wight', 'Wales:Anglesey'))
+
+england.plot <- ggplot() + 
+  geom_polygon(data = GBmap, 
+               aes(x = long, y = lat, group = group), 
+               fill = 'gray90', color = 'black') + 
+  coord_fixed(ratio = 1.3, xlim = c(-6.5,3), ylim = c(50, 55.5)) + 
+  theme_void()
+
+england.plot + geom_point(data = Dec17.run.wfreq[!is.na(Dec17.run.wfreq$longitude) ,], 
+             aes(x = as.numeric(longitude), 
+                 y = as.numeric(latitude),fill=omicron.mu),colour="black",shape=21,size=3) +
+             scale_color_gradient(low = "white", high = "red",na.value = NA,aesthetics = "fill")
+```
+
