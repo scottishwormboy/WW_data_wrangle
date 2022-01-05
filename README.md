@@ -12,3 +12,5 @@ write.out.JBCseq() creates a file that can be uploaded to JBC as metadata
 combine_csvs.R
 
 concat.JBCinput.csv() concatenates several RNA templates files, with or without sequence id data
+
+Added 5/1/22 some code to plot omicron on a map. I should have put into a separate folder...
